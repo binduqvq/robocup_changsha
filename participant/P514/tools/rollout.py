@@ -67,8 +67,23 @@ DEFAULT_ARTIFACT_DIR = _P514 / "artifacts"
 
 
 def build_agent_policy(policy_module, case, agent_index, policy_seed, params=None, artifact_dir=None):
+    """构建单个 agent 的策略实例。
+
+    `params` 语义（开发期实验用，务必分清）：
+    - params 为 None  → 走模块自己的默认路径。对 `entry` 即**提交配置**
+      （`entry.SUBMISSION_OVERRIDES` 生效），结论可直接作为提交行为。
+    - params 为 dict  → 在"提交配置"之上叠加实验覆盖（实验键优先）。
+      注意 `entry.reset()` 内部会用 `SUBMISSION_OVERRIDES` 覆盖传入参数，
+      因此这里显式合并，避免实验参数被静默吞掉（这个坑真实发生过：
+      所有 --grid 实验都跑在提交配置上，四组结果逐位相同）。
+    """
     art = Path(artifact_dir) if artifact_dir is not None else DEFAULT_ARTIFACT_DIR
     ctx = make_episode_context(case, agent_index, policy_seed)
+    if params is not None and hasattr(policy_module, "SUBMISSION_OVERRIDES"):
+        merged = dict(policy_module.SUBMISSION_OVERRIDES)
+        merged.update(params)
+        return build_agent_policy(rule_module(), case, agent_index, policy_seed,
+                                  params=merged, artifact_dir=artifact_dir)
     if hasattr(policy_module, "build_policy_for_agent"):
         policy = policy_module.build_policy_for_agent(ctx, art, params)
     else:  # entry.py 风格：build_policy(BuildContext)
@@ -84,6 +99,11 @@ def build_agent_policy(policy_module, case, agent_index, policy_seed, params=Non
         policy = policy_module.build_policy(build_ctx)
     policy.reset(ctx)
     return policy, ctx
+
+
+def rule_module():
+    """返回 `policies.rule` 模块（静态导入，避免动态载入触发静态审计硬拒绝）。"""
+    return rule
 
 
 def rollout_case(policy_module, case, repeat_index=0, verbose=False, params=None):

@@ -249,7 +249,24 @@ def main():
     ap.add_argument("--axis", default="all", choices=["all", "params", "horizon", "sensing"])
     ap.add_argument("--per-cell", type=int, default=6, help="每格独立种子数")
     ap.add_argument("--oracle", action="store_true", help="同时跑全信息 oracle 作为上界对照")
+    ap.add_argument("--params", default=None, help='策略参数 JSON，例如 {"reach_mode":"legacy"}')
+    ap.add_argument("--grid-file", type=Path, default=None, help="从文件读 JSON 网格（避免 shell 引号问题）")
     args = ap.parse_args()
+
+    import itertools
+    import json
+
+    if args.grid_file is not None:
+        grid = json.loads(args.grid_file.read_text(encoding="utf-8"))
+    elif args.params is not None:
+        grid = json.loads(args.params)
+    else:
+        grid = None
+    if grid:
+        keys = list(grid.keys())
+        combos = [dict(zip(keys, vals)) for vals in itertools.product(*(grid[k] for k in keys))]
+    else:
+        combos = [None]
 
     global _BASE
     _BASE = _base_config()
@@ -262,8 +279,10 @@ def main():
     chosen = list(axes) if args.axis == "all" else [args.axis]
     for key in chosen:
         fn, title = axes[key]
-        rows = compare(fn(), args.per_cell, with_oracle=args.oracle)
-        report(rows, title, with_oracle=args.oracle)
+        for params in combos:
+            rows = compare(fn(), args.per_cell, params=params, with_oracle=args.oracle)
+            tag = f"{title}" + (f"  params={params}" if params else "")
+            report(rows, tag, with_oracle=args.oracle)
 
 
 _BASE = None
