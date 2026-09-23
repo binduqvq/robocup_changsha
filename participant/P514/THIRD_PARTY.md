@@ -48,6 +48,13 @@
 | `tools/summarize_eval.py` | 评测输出目录逐回合汇总 |
 | `tools/export_learned.py` | 把 SB3 PPO 权重导出为纯 NumPy `policy.npz` 并做一致性检查 |
 | `tools/compare_three.py` | 规则 / 学习 / 随机 三方案同口径对照 |
+| `tools/final_metrics.py` | 随机化轴逐格综合指标（策略 vs 随机，32 种子/格） |
+
+> 说明：曾有一个 `tools/baseline_template.py`（用于把官方模板基线放到同一批场景上量化），
+> 因使用 `importlib.util.spec_from_file_location` 命中硬拒绝项
+> `UNREGISTERED_DYNAMIC_LOAD`，已**删除**；其测量结果已记录在 `LOG.md` 第 26 节。
+> 模板本身仍在 `participant/_template/` 与 git 历史中，可随时复现该对照。
+
 
 其中 `tools/rollout.py` 早期版本曾使用 `importlib.util.spec_from_file_location`
 动态载入策略模块，触发官方静态审计硬拒绝项 `UNREGISTERED_DYNAMIC_LOAD`；
