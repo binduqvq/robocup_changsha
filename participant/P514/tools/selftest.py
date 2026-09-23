@@ -33,6 +33,7 @@ from coverage_bench.suites import ScenarioCase  # noqa: E402
 from coverage_bench.validation import validate_action  # noqa: E402
 
 import entry  # noqa: E402
+from policies import rule  # noqa: E402
 from tools import generalize as g  # noqa: E402
 
 FAILURES: list[str] = []
@@ -165,6 +166,19 @@ def main():
     )
     check("reset 清空 last_seen/have_seen/_obs_step/_vel", clean)
 
+    # 第五轮新增的探索状态同属回合内记忆，必须一并清空（规程 §14）
+    pol2, ctx2 = policy_for(case, 0)
+    tr2 = pol2._tracker
+    tr2._visited.update({(1, 1), (2, 2), (-3, 4)})
+    tr2._explore_dir[:] = np.array([0.5, -0.5])
+    pol2.reset(ctx2)
+    t3 = pol2._tracker
+    check(
+        "reset 清空 _visited/_explore_dir（探索状态）",
+        len(t3._visited) == 0 and not np.any(t3._explore_dir != 0.0),
+        f"visited={len(t3._visited)} dir={t3._explore_dir}",
+    )
+
     print("=== 4. 每个 agent 实例互不共享可变状态 ===")
     p0, _ = policy_for(case, 0)
     p1, _ = policy_for(case, 1)
@@ -194,6 +208,47 @@ def main():
             check(f"{label} 正常完成", ok, f"actions={len(acts)}")
         except Exception as exc:  # noqa: BLE001
             check(f"{label} 正常完成", False, repr(exc))
+
+    print("=== 7. 搜索模式（bounce / unvisited）在长回合下动作合法 ===")
+    for mode in ("index", "bounce", "unvisited"):
+        for (n, m, t) in ((3, 3, 10), (3, 3, 60), (1, 3, 30), (5, 5, 30)):
+            try:
+                cfg = g.make_config(base, n, m, t, "uniform")
+                c = ScenarioCase("st", "st", cfg, 4242)
+                env = make_training_env(cfg)
+                obs, _ = env.reset(seed=4242)
+                ids = list(env.agents)
+                pols = []
+                for i in range(n):
+                    ctx = make_ctx(c, i)
+                    p = rule.build_policy_for_agent(ctx, None, {"search_mode": mode})
+                    p.reset(ctx)
+                    pols.append(p)
+                bad = 0
+                for _ in range(t):
+                    d = {}
+                    for i, aid in enumerate(ids):
+                        a = pols[i].act(obs[aid])
+                        try:
+                            validate_action(a)
+                        except Exception:  # noqa: BLE001
+                            bad += 1
+                        d[aid] = a
+                    obs, _r, _tt, _tr, _i = env.step(d)
+                check(
+                    f"{mode} {n}v{m} T={t}: 全部动作合法",
+                    bad == 0,
+                    f"非法动作数={bad}",
+                )
+            except Exception as exc:  # noqa: BLE001
+                check(f"{mode} {n}v{m} T={t}: 全部动作合法", False, repr(exc))
+            finally:
+                try:
+                    for q in pols:
+                        q.close()
+                    env.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
     print()
     if FAILURES:
