@@ -25,3 +25,7 @@ E015,2026-02-14,P514@learned-1M,PPO 1M steps on scenario mixture (uniform+crossi
 E016,2026-02-14,P514@three-way,rule vs learned vs random (same scenarios),-,heldout seed_base=555000,128,2,0.1448,0.1445,183.33,144.64,ok,规则144.64 vs 学习77.40 vs 随机58.02;学习明显优于随机但仅为规则的一半 → 不替换
 E017,2026-02-14,P514@learned-10M,PPO 10M steps with wider scenario pool,SB3 PPO num_vec_envs=8 seed_scales=16,train seeds from 4000000 (2048 scenarios),2048,16,,,183.33,82.60,ok,用于排除"只是训得不够";曲线收敛到0.70~1.23;公开分183.33恰与规则相同但留出只有82.6 → 公开套件陷阱
 E018,2026-02-14,P514@learned-10M-s2,PPO 10M steps second seed (robustness),seed=20260214 其余同E017,train seeds from 4000000 (2048 scenarios),2048,16,,,83.33,83.80,ok,三次学习运行留出分77.4/82.6/83.8(均值81.3,极差6.4)≈规则的56%;三个模型公开分100/183/83全部落在规则bootstrap区间[16.67,350.00]内 → 反证区间合理
+E019,2026-02-14,P514@baseline,official template PPO on same axes,-,heldout seed_base=555000,128,2,0.0547,0.0599,66.67,57.29,ok,模板留出仅57.29而随机58.02 → 模板几乎没学到东西;12格中12/12低于最终版本;该测量工具因动态载入被硬拒绝已删除
+E020,2026-02-14,P514@rule-v1-coord,code audit for bugs and perf risks,-,-,0,0,-,-,,,ok,发现缺陷A(自索引冗余,无影响)与B(搜索不用自身位置);C~G确认安全(无越界/无3v3硬编码/不读全局状态/无除零)
+E021,2026-02-14,P514@rule-v1-coord,position-aware center-directed search,search_mode x center_weight,heldout seed_base=555000,96,2,0.1332,0.1194,,126.32,negative,center模式126.042 vs index 126.319,center_weight无影响 → 原理成立但实测无效(目标运动抹平布局优势)
+E022,2026-02-14,P514@rule-v1-coord,policy protocol self-test,15 checks across 9 configs,-,9,1,-,-,,,ok,动作形状/dtype/有限/范围、未reset兜底、回合隔离、实例隔离、确定性、退化配置全部PASS;act耗时0.03ms vs 限制1000ms

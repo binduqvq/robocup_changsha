@@ -43,11 +43,12 @@ class RuleParams:
     avoid_radius: float = 0.16
     avoid_gain: float = 0.9
     avoid_shrink: float = 0.0
-    search_mode: str = "index"       # index | fan | last_seen
+    search_mode: str = "index"       # index | fan | last_seen | center
     fan_span: float = 3.141592653589793
     search_scale: float = 1.0
     search_angle_offset: float = 0.0   # 搜索基准角偏移（index 模式）：所有机器人一起旋转
     search_angle_offset_1: float = 0.0  # 仅 agent_index==1 的额外偏移（用来打破均匀分布）
+    center_weight: float = 1.0         # center 模式下朝场地中心的权重
     goal_select: str = "nearest"     # nearest | index | coordinated
     keep_track: int = 1
     # ---- 拦截（预估目标速度，瞄准未来位置而非当前位置）----
@@ -189,16 +190,33 @@ class AnalyticTracker:
         mine = assign.get(0)
         return None if mine is None else int(tgt_idx[mine])
 
-    def _search_goal(self) -> np.ndarray:
+    def _search_goal(self, self_pos: np.ndarray | None = None) -> np.ndarray:
         n = max(1, self.p.num_agents)
+        if self.p.search_mode == "center" and self_pos is not None:
+            # 位置感知搜索：目标按 uniform(±(L−r)) 布设，靠近场地中心的**面密度更高**，
+            # 而感知半径内到边界的面积远小于中心。因此原地不动/固定方向都不如朝中心走。
+            # 用"朝圆心 + 沿编号切向分量"兼顾密度与分散（纯朝中心会让多机挤到一起）。
+            to_center = -np.asarray(self_pos, dtype=np.float64)
+            nc = float(np.linalg.norm(to_center))
+            if nc > _EPS:
+                radial = to_center / nc
+            else:
+                radial = np.zeros(2, dtype=np.float64)
+            angle = 2.0 * np.pi * (self.p.agent_index / n)
+            tangential = np.array([-radial[1], radial[0]], dtype=np.float64)
+            w = float(np.clip(self.p.center_weight, 0.0, 1.0))
+            goal = w * radial + (1.0 - w) * tangential
+            if float(np.linalg.norm(goal)) < _EPS:
+                goal = tangential
+            return goal * self.p.search_scale
         if self.p.search_mode == "fan":
             span = float(self.p.fan_span)
             angle = 0.0 if n == 1 else -span / 2.0 + span * (self.p.agent_index / (n - 1))
-            angle += self.p.search_angle_offset
         else:  # index：按编号把 2π 均分，无需通信即可分散
-            angle = 2.0 * np.pi * (self.p.agent_index / n) + self.p.search_angle_offset
-            if self.p.agent_index == 1:
-                angle += self.p.search_angle_offset_1
+            angle = 2.0 * np.pi * (self.p.agent_index / n)
+        angle += self.p.search_angle_offset
+        if self.p.agent_index == 1:
+            angle += self.p.search_angle_offset_1
         return np.array([np.cos(angle), np.sin(angle)], dtype=np.float64) * self.p.search_scale
 
     def act(self, obs):
@@ -285,7 +303,7 @@ class AnalyticTracker:
             cand = self.last_seen[self.have_seen]
             goal = cand[int(np.argmin(np.linalg.norm(cand, axis=1)))][:2]
         if goal is None:
-            goal = self._search_goal()
+            goal = self._search_goal(self_pos)
 
         # ---- 解析式追击方向：u ∝ goal − k·v·dt ----
         drive = goal - p.k * self_vel * p.dt
