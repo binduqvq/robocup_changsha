@@ -46,8 +46,34 @@
 | `tools/upper_bound.py` | 规则策略 vs 全信息 oracle 对照 |
 | `tools/bootstrap_ci.py` | 公开成绩的 bootstrap 置信区间 |
 | `tools/summarize_eval.py` | 评测输出目录逐回合汇总 |
+| `tools/export_learned.py` | 把 SB3 PPO 权重导出为纯 NumPy `policy.npz` 并做一致性检查 |
+| `tools/compare_three.py` | 规则 / 学习 / 随机 三方案同口径对照 |
 
 其中 `tools/rollout.py` 早期版本曾使用 `importlib.util.spec_from_file_location`
 动态载入策略模块，触发官方静态审计硬拒绝项 `UNREGISTERED_DYNAMIC_LOAD`；
 现已改为包内静态导入，预检 `rejections=0`。提交目录内**不含**任何动态载入调用。
+
+## 学习路线相关文件（实验对照，不参与最终推理）
+
+最终提交是纯规则策略，`artifacts/` 为空，推理路径不导入以下文件；
+它们用于复现"为什么不用学习"这一对照实验：
+
+| 文件 | 用途 | 是否在推理路径 |
+|---|---|---|
+| `train.py` | 场景混合的 SB3 PPO 训练（`.venv-train` 内运行，含 torch） | 否 |
+| `policies/learned.py` | 学习策略的纯 NumPy 推理实现（**无 torch、无 pickle**） | 否（`entry.py` 不导入） |
+| `tools/export_learned.py` | 训练权重 → `policy.npz` 导出与一致性校验 | 否 |
+
+**注意（实测的静态审计结果）**：`train.py` 与 `tools/export_learned.py` 会在训练侧使用
+PyTorch，因此源码审计命中 `torch` / `torch.no_grad` 符号。按 `coverage_bench/audit.py`，
+`torch` 属于 `SCAN_SYMBOLS`（**仅供人工审核，不参与拒绝判断**），
+只有 `torch.load` / `pickle.load` 等反序列化调用才是硬拒绝项（`_PICKLE_DESERIALIZE_CALLS`）——
+本项目**未使用任何反序列化调用**。实测预检结果：
+`rejections = []`，`scan_hits` 仅 2 条（均来自 `tools/export_learned.py` 的 torch 调用）。
+
+学习策略的模型产物不放在 `artifacts/`，因为预检会拒绝"清单未登记的产物文件"
+（实测报错 `提交校验失败: 发现未在清单中登记的产物文件: artifacts/policy.npz`）；
+它保存在 `outputs/` 下的训练目录中，属于实验材料而非评分产物。
+
+
 

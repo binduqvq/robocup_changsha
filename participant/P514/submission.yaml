@@ -4,11 +4,15 @@ protocol_version: "coverage-policy/1.0"
 task_version: "coverage-task/1.0"
 entrypoint: "entry:build_policy"
 artifact_dir: "artifacts"
+# 最终提交是纯规则策略：推理不读取任何模型产物，故清单为空、artifacts/ 目录为空。
+# 学习路线的训练产物属于实验对照材料，不属于本次评分产物（见 REPORT.md 第 8 节）。
 checkpoint_manifest: []
 inference_lock: "requirements-infer.lock"
 method_type: "rule"
-train_command: null
+# 纯规则方法按规程 §16 无需训练入口；此处仍登记学习对照的训练命令，便于复现该对照实验。
+# 该命令在本地训练环境（.venv-train，含 torch/SB3）执行，不参与正式推理。
+train_command: "python train.py --total-steps 1000000 --out ../../outputs/P514/train-1M"
 training_config_paths: []
 report_path: "REPORT.md"
 metadata:
-  description: "解析式追捕规则策略：bang-bang 追捕可见目标 + 视野外按编号分散搜索 + 可见邻居排斥避碰；纯 numpy，无模型产物"
+  description: "解析式追捕规则策略：bang-bang 追捕可见目标 + 可见队友就近分配协同 + 视野外按编号分散搜索 + 可见邻居排斥避碰；纯 numpy、无模型产物、无训练依赖"

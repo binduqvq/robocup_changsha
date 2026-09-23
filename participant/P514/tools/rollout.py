@@ -63,16 +63,20 @@ def make_episode_context(case, agent_index, policy_seed):
     )
 
 
-def build_agent_policy(policy_module, case, agent_index, policy_seed, params=None):
+DEFAULT_ARTIFACT_DIR = _P514 / "artifacts"
+
+
+def build_agent_policy(policy_module, case, agent_index, policy_seed, params=None, artifact_dir=None):
+    art = Path(artifact_dir) if artifact_dir is not None else DEFAULT_ARTIFACT_DIR
     ctx = make_episode_context(case, agent_index, policy_seed)
     if hasattr(policy_module, "build_policy_for_agent"):
-        policy = policy_module.build_policy_for_agent(ctx, _P514 / "artifacts", params)
+        policy = policy_module.build_policy_for_agent(ctx, art, params)
     else:  # entry.py 风格：build_policy(BuildContext)
         from coverage_bench.protocol import BuildContext, ResourceLimits, get_protocol_spec
 
         build_ctx = BuildContext(
             spec=get_protocol_spec(),
-            artifact_dir=_P514 / "artifacts",
+            artifact_dir=art,
             device="cpu",
             limits=ResourceLimits(),
             rng=np.random.default_rng(policy_seed),

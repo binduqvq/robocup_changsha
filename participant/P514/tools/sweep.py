@@ -59,7 +59,7 @@ def make_heldout_cases(seed_offset: int, per_group: int, repeats: int = 2):
     return cases
 
 
-def evaluate_cases(policy_module, cases, params=None, verbose=False):
+def evaluate_cases(policy_module, cases, params=None, verbose=False, artifact_dir=None):
     rows = []
     for case in cases:
         cfg = case.task_config
@@ -68,7 +68,10 @@ def evaluate_cases(policy_module, cases, params=None, verbose=False):
         agent_ids = list(env.agents)
         policies = []
         for i in range(cfg.num_agents):
-            policy, _ = build_agent_policy(policy_module, case, i, policy_seed=1000 + i, params=params)
+            policy, _ = build_agent_policy(
+                policy_module, case, i, policy_seed=1000 + i, params=params,
+                artifact_dir=artifact_dir,
+            )
             policies.append(policy)
 
         def inject_state():
