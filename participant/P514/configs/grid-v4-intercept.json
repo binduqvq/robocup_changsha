@@ -1,0 +1,6 @@
+{
+  "intercept": [0, 1],
+  "intercept_weight": [1.0, 0.6],
+  "intercept_max_lead": [2, 4, 6],
+  "vel_ema": [1.0, 0.5]
+}

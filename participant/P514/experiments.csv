@@ -10,3 +10,7 @@ E004h,2026-02-14,P514@calib,oracle nearest (global state),-,heldout seed_offset=
 E005,2026-02-14,P514@rule-v1,search/track variants,search_mode x fan_span x keep_track x goal_select,heldout seed_offset=555000,48,1,0.1322,0.1097,,120.97,negative,24 组无显著差异；不同种子集本身有约 ±7 分波动
 E006,2026-02-14,P514@rule-v1-final,analytic tracker (FINAL SUBMISSION),defaults,configs/public-suite-v1.yaml,4,2,0.0833,0.2833,183.33,,ok,最终提交；预检 rejections=0 scan_hits=0；8/8 回合 ok；entry.py 采用 policies/rule.py
 E006h,2026-02-14,P514@rule-v1-final,analytic tracker (FINAL SUBMISSION),defaults,heldout seed_offset=555000,128,2,0.1448,0.1445,,144.64,ok,128 个独立留出场景；期望表现的更可靠估计
+E007a,2026-02-14,P514@rule-v1-final,search-direction geometry,search_angle_offset x search_angle_offset_1,heldout seed_offset=555000,96,2,0.1332,0.1194,,126.32,negative,65 组全落 125.90~126.32；默认均匀分布(0,0)最优；搜索方向无可用自由度
+E007b,2026-02-14,P514@rule-v1-final,intercept (target velocity estimation + lead aim),intercept x intercept_weight x intercept_max_lead x vel_ema,heldout seed_offset=555000,96,2,0.1335,0.1187,,126.11,negative,拦截开启反而略低于关闭(126.32)；理论 0.39 步滞后收益不可利用；默认关闭
+E007c,2026-02-14,P514@calib,oracle greedy 1-step joint action search (global state),grid={-1,0,1} 729 combos,heldout seed_offset=555000,32,1,0.0437,0.0688,,56.25,negative,远低于规则策略(同批场景 137.71)→瞬时贪心短视,是下界而非上界;贪心最大化即时覆盖在本题是错策略
+E008,2026-02-14,P514@rule-v1-final,bootstrap CI of public score (4 scenes),20000 resamples,configs/public-suite-v1.yaml,4,2,0.0833,0.2833,183.33,,ok,点估计183.33但95%区间[16.67,350.00];公开套件仅4独立场景,不能当稳定成绩

@@ -33,7 +33,6 @@ from coverage_bench.protocol import (  # noqa: E402
 from coverage_bench.runtime import _public_task_params  # noqa: E402
 from coverage_bench.suites import load_suite  # noqa: E402
 
-import entry_rule  # noqa: E402  P514 根目录下，与官方 entry 同一生命周期
 from policies import probe, random_ref, rule  # noqa: E402
 
 PUBLIC_SUITE = _REPO_ROOT / "configs" / "public-suite-v1.yaml"
@@ -41,10 +40,10 @@ PUBLIC_SUITE = _REPO_ROOT / "configs" / "public-suite-v1.yaml"
 # 策略名 → 模块。使用包内静态导入而非按路径动态载入：
 # 官方静态审计（coverage_bench/audit.py）把 importlib 动态载入列为硬拒绝项，
 # 因此提交目录内不允许出现 spec_from_file_location 之类的调用。
-# entry_rule 走与正式评测相同的 BuildContext 生命周期，是最可信的本地路径。
+# "entry" 走与正式评测完全相同的 BuildContext→reset(EpisodeContext) 生命周期，
+# 是最可信的本地路径；它延迟到使用时才导入，避免与题面文件互相牵制。
 POLICIES = {
     "rule": rule,
-    "entry_rule": entry_rule,
     "random_ref": random_ref,
     "probe": probe,
 }
@@ -146,9 +145,9 @@ def main():
     args = parser.parse_args()
 
     if args.policy == "entry":
-        from entry import build_policy as _build  # noqa: F401  仅确认入口可导入
+        import entry  # 延迟导入：与正式评测入口完全一致
 
-        module = None
+        module = entry
     else:
         if args.policy not in POLICIES:
             raise SystemExit(f"未知策略: {args.policy}（可用: entry, {', '.join(POLICIES)}）")

@@ -46,8 +46,15 @@ class RuleParams:
     search_mode: str = "index"       # index | fan | last_seen
     fan_span: float = 3.141592653589793
     search_scale: float = 1.0
+    search_angle_offset: float = 0.0   # 搜索基准角偏移（index 模式）：所有机器人一起旋转
+    search_angle_offset_1: float = 0.0  # 仅 agent_index==1 的额外偏移（用来打破均匀分布）
     goal_select: str = "nearest"     # nearest | index
     keep_track: int = 1
+    # ---- 拦截（预估目标速度，瞄准未来位置而非当前位置）----
+    intercept: int = 0               # 1=启用速度估计与拦截瞄准
+    vel_ema: float = 1.0             # 速度估计的 EMA 系数（1.0=只用最近两次观测）
+    intercept_max_lead: int = 6      # 最多向前预判多少步
+    intercept_weight: float = 1.0    # 1.0=完全瞄准预判点；<1 时与当前位置混合
 
     @property
     def k(self) -> float:
@@ -92,7 +99,32 @@ class AnalyticTracker:
         self.p = params
         self.last_seen = np.zeros((params.num_targets, 3), dtype=np.float64)
         self.have_seen = np.zeros(params.num_targets, dtype=bool)
+        # 拦截所需的逐目标观测历史（绝对位置、观测步、估计速度）
+        self._obs_pos_abs = np.zeros((params.num_targets, 2), dtype=np.float64)
+        self._obs_step = np.full(params.num_targets, -1, dtype=np.int64)
+        self._vel = np.zeros((params.num_targets, 2), dtype=np.float64)
         self._radius_table = self._build_radius_table(params.horizon + 2)
+
+    def _predicted_rel(self, j: int, at_step: int, self_pos: np.ndarray) -> np.ndarray:
+        """目标 j 在 at_step 时刻相对**当前**自身位置的预测位置。
+
+        观测给的是"目标 − 自身"的相对量，而自身也在移动，因此不能直接对
+        相对量做外推：必须先还原成绝对坐标再预测。
+            target_abs(t_obs) = self_abs(t_obs) + rel_obs
+            target_abs(t)     = target_abs(t_obs) + v̂·(t − t_obs)
+            rel_pred(t)       = target_abs(t) − self_abs(t)
+        目标在 T=10 内转向间隔 5~10 步，几个步长内的匀速外推是合理近似。
+        """
+        if not self.have_seen[j] or self._obs_step[j] < 0:
+            return self._obs_pos_abs[j] - self_pos
+        age = at_step - self._obs_step[j]
+        if age <= 0:
+            return self._obs_pos_abs[j] - self_pos
+        pred_abs = self._obs_pos_abs[j] + self._vel[j] * age
+        # 目标被限制在 ±(L − r_target) 内反射，夹紧避免外推到场地外
+        limit = 1.0 - self.p.coverage_radius
+        pred_abs = np.clip(pred_abs, -limit, limit)
+        return pred_abs - self_pos
 
     # ------------------------------------------------------------------
     def _build_radius_table(self, max_steps: int):
@@ -115,21 +147,29 @@ class AnalyticTracker:
     def reset(self, context=None):
         self.last_seen[:] = 0.0
         self.have_seen[:] = False
+        self._obs_pos_abs[:] = 0.0
+        self._obs_step[:] = -1
+        self._vel[:] = 0.0
 
     def _search_goal(self) -> np.ndarray:
         n = max(1, self.p.num_agents)
         if self.p.search_mode == "fan":
             span = float(self.p.fan_span)
             angle = 0.0 if n == 1 else -span / 2.0 + span * (self.p.agent_index / (n - 1))
+            angle += self.p.search_angle_offset
         else:  # index：按编号把 2π 均分，无需通信即可分散
-            angle = 2.0 * np.pi * (self.p.agent_index / n)
+            angle = 2.0 * np.pi * (self.p.agent_index / n) + self.p.search_angle_offset
+            if self.p.agent_index == 1:
+                angle += self.p.search_angle_offset_1
         return np.array([np.cos(angle), np.sin(angle)], dtype=np.float64) * self.p.search_scale
 
     def act(self, obs):
         p = self.p
         st = np.asarray(obs["self_state"], dtype=np.float64)
+        self_pos = st[:2]
         self_vel = st[2:4]
-        steps_left = max(1, p.horizon - int(obs["step_index"]))
+        step_idx = int(obs["step_index"])
+        steps_left = max(1, p.horizon - step_idx)
 
         # 观测按固定容量 A=B=8 给出，实际实体数由 exists 掩码表达
         targets = np.asarray(obs["targets"], dtype=np.float64)[: p.num_targets]
@@ -137,24 +177,61 @@ class AnalyticTracker:
         peers = np.asarray(obs["peers"], dtype=np.float64)[: p.num_agents]
         p_vis = np.asarray(obs["peer_visible"], dtype=bool)[: p.num_agents]
 
+        # ---- 目标速度估计：用两次"相邻步"观测做有限差分（目标不提供速度字段）----
+        if p.intercept and t_vis.any():
+            for j in np.flatnonzero(t_vis):
+                gap = step_idx - self._obs_step[j]
+                if self._obs_step[j] >= 0 and gap == 1:
+                    v = (targets[j, :2] - self._obs_pos_abs[j] + self_pos) / p.dt  # 场地尺度/步
+                    self._vel[j] = p.vel_ema * v + (1.0 - p.vel_ema) * self._vel[j]
+                elif gap > 1:
+                    # 间隔超过 1 步：期间可能发生转向，不能把旧差分当速度用
+                    self._vel[j] *= 0.0
+                self._obs_pos_abs[j] = targets[j, :2] + self_pos
+                self._obs_step[j] = step_idx
+                self.have_seen[j] = True
+
         goal = None
         if t_vis.any():
-            self.last_seen[t_vis] = targets[t_vis]
-            self.have_seen[t_vis] = True
             idx = np.flatnonzero(t_vis)
             dist = np.linalg.norm(targets[idx, :2], axis=1)
             order = idx[np.argsort(dist)]
-            if p.keep_track:
-                # 优先追"剩余步数内真的够得着"的目标；一个都够不着时才退回最近者
-                reach = self._reachable(steps_left) + p.coverage_radius
-                ok = order[dist[np.argsort(dist)] <= reach]
-                if len(ok):
-                    order = ok
-            if p.goal_select == "index":
-                mine = p.agent_index % max(1, p.num_targets)
-                goal = targets[mine, :2] if t_vis[mine] else targets[order[0], :2]
-            else:
-                goal = targets[order[0], :2]
+
+            if p.intercept:
+                # 拦截：分别在每个目标上求"最小可达步数 t"，取 t 最小者，
+                # 并瞄准该目标在 t 步后的预测位置（目标在 T=10 内近似弹道运动）。
+                lead_cap = min(int(p.intercept_max_lead), steps_left)
+                best = None
+                for k, j in enumerate(order):
+                    base = targets[j, :2]
+                    t_min = None
+                    if float(np.linalg.norm(base)) <= self._reachable(steps_left) + p.coverage_radius:
+                        t_min = 0
+                    else:
+                        for t in range(1, lead_cap + 1):
+                            pt = self._predicted_rel(j, step_idx + t, self_pos)
+                            if float(np.linalg.norm(pt)) <= self._reachable(steps_left - t) + p.coverage_radius:
+                                t_min = t
+                                break
+                    if t_min is None:
+                        continue
+                    cand_pt = self._predicted_rel(j, step_idx + t_min, self_pos)
+                    if best is None or t_min < best[0]:
+                        best = (t_min, cand_pt)
+                if best is not None:
+                    goal = (1.0 - p.intercept_weight) * targets[order[0], :2] + p.intercept_weight * best[1]
+            if goal is None:
+                if p.keep_track:
+                    # 优先追"剩余步数内真的够得着"的目标；一个都够不着时才退回最近者
+                    reach = self._reachable(steps_left) + p.coverage_radius
+                    ok = order[dist[np.argsort(dist)] <= reach]
+                    if len(ok):
+                        order = ok
+                if p.goal_select == "index":
+                    mine = p.agent_index % max(1, p.num_targets)
+                    goal = targets[mine, :2] if t_vis[mine] else targets[order[0], :2]
+                else:
+                    goal = targets[order[0], :2]
 
         # 视野内无目标：优先朝最后目击点，否则按编号方向搜索
         if goal is None and p.search_mode == "last_seen" and self.have_seen.any():
