@@ -1,0 +1,7 @@
+{
+  "predict_reflect": [0, 1],
+  "intercept": [1],
+  "intercept_weight": [1.0],
+  "intercept_max_lead": [10],
+  "vel_ema": [1.0]
+}

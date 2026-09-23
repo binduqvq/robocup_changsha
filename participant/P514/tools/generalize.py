@@ -248,6 +248,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--axis", default="all", choices=["all", "params", "horizon", "sensing"])
     ap.add_argument("--per-cell", type=int, default=6, help="每格独立种子数")
+    ap.add_argument("--seed-base", type=int, default=555000, help="场景种子起点")
     ap.add_argument("--oracle", action="store_true", help="同时跑全信息 oracle 作为上界对照")
     ap.add_argument("--params", default=None, help='策略参数 JSON，例如 {"reach_mode":"legacy"}')
     ap.add_argument("--grid-file", type=Path, default=None, help="从文件读 JSON 网格（避免 shell 引号问题）")
@@ -280,7 +281,10 @@ def main():
     for key in chosen:
         fn, title = axes[key]
         for params in combos:
-            rows = compare(fn(), args.per_cell, params=params, with_oracle=args.oracle)
+            rows = compare(
+                fn(), args.per_cell, params=params, seed_base=args.seed_base,
+                with_oracle=args.oracle,
+            )
             tag = f"{title}" + (f"  params={params}" if params else "")
             report(rows, tag, with_oracle=args.oracle)
 

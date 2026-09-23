@@ -15,4 +15,4 @@ train_command: "python train.py --total-steps 1000000 --out ../../outputs/P514/t
 training_config_paths: []
 report_path: "REPORT.md"
 metadata:
-  description: "解析式追捕规则策略：bang-bang 追捕可见目标 + 可见队友就近分配协同 + 视野外按编号分散搜索 + 可见邻居排斥避碰；纯 numpy、无模型产物、无训练依赖"
+  description: "解析式追捕规则策略：局部历史目标速度估计 + 含当前动量的有限时域截获 + 可见队友就近分配 + 定向搜索 + 预测式侧向避碰；纯 numpy、无模型产物、无训练依赖"

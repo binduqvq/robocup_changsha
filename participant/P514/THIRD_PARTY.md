@@ -26,6 +26,19 @@
 说明：这些库由公开包模板与本仓库依赖锁引入；本参赛者未复制其源码，
 也未修改其实现。最终提交不依赖它们。
 
+## 算法调研资料（仅参考论文思想，未复制代码或模型）
+
+| 资料 | 本项目中的用途 | 来源 |
+|---|---|---|
+| Dynamic multi-agent assignment via discrete optimal transport | 动力学感知的目标分配思路；精确局部匹配消融 E036 | https://arxiv.org/abs/1910.10748 |
+| Toward multi-target self-organizing pursuit in a partially observable Markov game | 将无通信追捕拆为搜索、分配、单目标追捕 | https://arxiv.org/abs/2206.12330 |
+| The Hybrid Reciprocal Velocity Obstacle | 相对位置/速度的预测式避碰思想 | https://doi.org/10.1109/TRO.2011.2120810 |
+| The Surprising Effectiveness of PPO in Cooperative Multi-Agent Games | MAPPO/CTDE 对照路线 | https://arxiv.org/abs/2103.01955 |
+| Multi-Agent Reinforcement Learning is a Sequence Modeling Problem | MAT 作为长回合协同的后续候选 | https://arxiv.org/abs/2205.14953 |
+
+这些资料只影响算法设计与实验选择；本目录没有复制其源码、伪代码、模型权重或数据集，
+因此不会给最终推理路径增加第三方许可或运行依赖。
+
 ## 本目录内自研代码
 
 `entry.py`、`policies/rule.py`、`policies/random_ref.py`、`policies/probe.py`、

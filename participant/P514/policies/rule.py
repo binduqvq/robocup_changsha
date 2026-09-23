@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, replace
+from functools import lru_cache
 
 import numpy as np
 
@@ -51,6 +52,7 @@ class RuleParams:
     search_angle_offset_1: float = 0.0  # 仅 agent_index==1 的额外偏移（用来打破均匀分布）
     center_weight: float = 1.0         # center 模式下朝场地中心的权重
     goal_select: str = "nearest"     # nearest | index | coordinated | cover
+    assignment_solver: str = "greedy"  # greedy | optimal（局部可见二分图的精确最小成本匹配）
     keep_track: int = 1
     # ---- 覆盖时长最优的目标选择（第五轮新增）----
     # 动机：离线"恒定动作上界"在 T=10 上比本规则高约 41%（32 场景 5.97 vs 4.22），
@@ -76,6 +78,7 @@ class RuleParams:
     vel_ema: float = 1.0             # 速度估计的 EMA 系数（1.0=只用最近两次观测）
     intercept_max_lead: int = 6      # 最多向前预判多少步
     intercept_weight: float = 1.0    # 1.0=完全瞄准预判点；<1 时与当前位置混合
+    predict_reflect: int = 0         # 1=按公开边界规则反射预测；0=旧的边界夹紧近似
     # ---- 交叉感知避碰（第六轮新增）----
     # 动机：长回合下把搜索模式从"固定方向"改成"反射巡逻"后覆盖率上升，
     # 但**碰撞惩罚同步上升**，净 J 反而下降（T=256: 0.6118 -> 0.6006）。
@@ -160,10 +163,32 @@ class AnalyticTracker:
         age = at_step - self._obs_step[j]
         if age <= 0:
             return self._obs_pos_abs[j] - self_pos
-        pred_abs = self._obs_pos_abs[j] + self._vel[j] * age
-        # 目标被限制在 ±(L − r_target) 内反射，夹紧避免外推到场地外
+        # `_vel` 由相邻两帧绝对位置差除以 dt 得到，单位是“场地尺度/秒”；
+        # `age` 则是离散步数。这里必须再乘 dt 才能得到位移。历史实现漏掉
+        # 这一因子，会把目标外推约 1/dt=10 倍，并在边界夹紧后产生虚假拦截点。
         limit = 1.0 - self.p.coverage_radius
-        pred_abs = np.clip(pred_abs, -limit, limit)
+        elapsed = age * self.p.dt
+        if self.p.predict_reflect:
+            pred_abs = self._obs_pos_abs[j].copy()
+            for axis in (0, 1):
+                pos = float(pred_abs[axis])
+                vel = float(self._vel[j, axis])
+                remaining = float(elapsed)
+                while remaining > _EPS and abs(vel) > _EPS:
+                    wall = limit if vel > 0.0 else -limit
+                    t_wall = (wall - pos) / vel
+                    if t_wall > remaining:
+                        pos += vel * remaining
+                        remaining = 0.0
+                    else:
+                        pos = wall
+                        vel = -vel
+                        remaining -= max(0.0, t_wall)
+                pred_abs[axis] = pos
+        else:
+            pred_abs = self._obs_pos_abs[j] + self._vel[j] * elapsed
+            # 旧近似：只夹紧到边界，不模拟反弹后的回程。
+            pred_abs = np.clip(pred_abs, -limit, limit)
         return pred_abs - self_pos
 
     # ------------------------------------------------------------------
@@ -243,16 +268,42 @@ class AnalyticTracker:
         tgt_pos = targets[tgt_idx, :2]
 
         dmat = np.linalg.norm(poses[:, None, :] - tgt_pos[None, :, :], axis=2)
-        order = np.dstack(np.unravel_index(np.argsort(dmat, axis=None), dmat.shape))[0]
-        taken_agents: set[int] = set()
-        taken_targets: set[int] = set()
         assign: dict[int, int] = {}
-        for ai, ti in order:
-            if ai in taken_agents or ti in taken_targets:
-                continue
-            assign[int(ai)] = int(ti)
-            taken_agents.add(int(ai))
-            taken_targets.add(int(ti))
+        if self.p.assignment_solver == "optimal":
+            # 最大基数优先、总距离最小的精确匹配。容量上限为 8，状态数最多
+            # A*2^B=2048；比按边排序的贪心更稳，同时远低于单步时间限制。
+            na, nt = dmat.shape
+
+            @lru_cache(maxsize=None)
+            def solve(ai: int, used: int):
+                if ai == na:
+                    return 0, 0.0, ()
+                count, cost, tail = solve(ai + 1, used)
+                best = (count, cost, (-1,) + tail)
+                for ti in range(nt):
+                    if used & (1 << ti):
+                        continue
+                    sub_count, sub_cost, sub_tail = solve(ai + 1, used | (1 << ti))
+                    cand = (sub_count + 1, sub_cost + float(dmat[ai, ti]), (ti,) + sub_tail)
+                    if (cand[0] > best[0]
+                            or (cand[0] == best[0] and cand[1] < best[1] - 1e-12)
+                            or (cand[0] == best[0] and abs(cand[1] - best[1]) <= 1e-12
+                                and cand[2] < best[2])):
+                        best = cand
+                return best
+
+            _count, _cost, chosen = solve(0, 0)
+            assign = {ai: ti for ai, ti in enumerate(chosen) if ti >= 0}
+        else:
+            order = np.dstack(np.unravel_index(np.argsort(dmat, axis=None), dmat.shape))[0]
+            taken_agents: set[int] = set()
+            taken_targets: set[int] = set()
+            for ai, ti in order:
+                if ai in taken_agents or ti in taken_targets:
+                    continue
+                assign[int(ai)] = int(ti)
+                taken_agents.add(int(ai))
+                taken_targets.add(int(ti))
 
         mine = assign.get(0)
         return None if mine is None else int(tgt_idx[mine])
@@ -428,28 +479,37 @@ class AnalyticTracker:
                     )
 
             if p.intercept:
-                # 拦截：分别在每个目标上求"最小可达步数 t"，取 t 最小者，
-                # 并瞄准该目标在 t 步后的预测位置（目标在 T=10 内近似弹道运动）。
+                # 有限时域拦截：分别在每个目标上求“从现在起最早可进入覆盖半径”的
+                # 步数 tau，并瞄准该时刻的预测位置。旧实现先用整个剩余回合的可达
+                # 半径判断当前目标，只要最终够得着就令 tau=0，因此绝大多数场景根本
+                # 不会使用速度预测；这里改为逐 tau 检查真正的截获条件。
                 lead_cap = min(int(p.intercept_max_lead), steps_left)
                 best = None
-                for k, j in enumerate(order):
-                    base = targets[j, :2]
+                for rank, j in enumerate(order):
                     t_min = None
-                    if float(np.linalg.norm(base)) <= self._reachable(steps_left) + p.coverage_radius:
-                        t_min = 0
-                    else:
-                        for t in range(1, lead_cap + 1):
-                            pt = self._predicted_rel(j, step_idx + t, self_pos)
-                            if float(np.linalg.norm(pt)) <= self._reachable(steps_left - t) + p.coverage_radius:
-                                t_min = t
-                                break
+                    cand_pt = None
+                    for tau in range(1, lead_cap + 1):
+                        pt = self._predicted_rel(j, step_idx + tau, self_pos)
+                        # 即使未来不再施加控制，当前速度也会按 k^t 衰减并产生位移；
+                        # 从目标相对位置中扣掉这部分“被动漂移”，剩余距离才应与
+                        # 从静止起算的控制可达半径 R[tau] 比较。
+                        if abs(1.0 - p.k) > _EPS:
+                            drift_gain = p.dt * (1.0 - p.k ** tau) / (1.0 - p.k)
+                        else:
+                            drift_gain = p.dt * tau
+                        residual = pt - self_vel * drift_gain
+                        if float(np.linalg.norm(residual)) <= self._reachable(tau) + p.coverage_radius:
+                            t_min = tau
+                            cand_pt = pt
+                            break
                     if t_min is None:
                         continue
-                    cand_pt = self._predicted_rel(j, step_idx + t_min, self_pos)
-                    if best is None or t_min < best[0]:
-                        best = (t_min, cand_pt)
+                    candidate = (t_min, rank, cand_pt)
+                    if best is None or candidate[:2] < best[:2]:
+                        best = candidate
                 if best is not None:
-                    goal = (1.0 - p.intercept_weight) * targets[order[0], :2] + p.intercept_weight * best[1]
+                    goal = ((1.0 - p.intercept_weight) * targets[order[0], :2]
+                            + p.intercept_weight * best[2])
             if goal is None:
                 if p.keep_track:
                     # 优先追"剩余步数内真的够得着"的目标；一个都够不着时才退回最近者

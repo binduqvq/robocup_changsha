@@ -23,12 +23,18 @@ if str(_HERE) not in sys.path:
 
 from policies.rule import AnalyticTracker, build_tracker  # noqa: E402
 
-# 提交默认参数：goal_select="coordinated" 用"自己 + 可见队友"做无通信就近分配。
-# 在 3v3/T=10（公开组与核验组）上与 nearest 逐位一致——该回合长度下总可达位移
-# 仅约 0.21，协同无可用自由度；但在更大规模/更长回合上稳定提升覆盖率并降低碰撞
-# （LOG.md 泛化章节：N8M8 覆盖率 0.327→0.341、碰撞率 0.040→0.019，独立种子集复现）。
-# 因此这是"不牺牲当前分数、只增强泛化"的默认选择。
-SUBMISSION_OVERRIDES = {"goal_select": "coordinated"}
+# 提交默认参数：
+# - coordinated 用“自己 + 可见队友”做无通信就近分配；
+# - intercept 用相邻观测估计目标速度，在含当前机器人动量的有限时域可达集上
+#   求最早截获点。两套不相交的 128 场景上分别提升 +0.68 / +1.20 分，且
+#   12 个规模/布局格仍全部优于随机（见 LOG.md 第七轮）。
+SUBMISSION_OVERRIDES = {
+    "goal_select": "coordinated",
+    "intercept": 1,
+    "intercept_weight": 1.0,
+    "intercept_max_lead": 10,
+    "vel_ema": 1.0,
+}
 
 
 class RulePolicy:

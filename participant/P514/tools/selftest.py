@@ -209,7 +209,23 @@ def main():
         except Exception as exc:  # noqa: BLE001
             check(f"{label} 正常完成", False, repr(exc))
 
-    print("=== 7. 搜索模式（bounce / unvisited）在长回合下动作合法 ===")
+    print("=== 7. 目标速度外推的单位一致性 ===")
+    unit_case = ScenarioCase("unit", "unit", g.make_config(base, 3, 3, 10, "uniform"), 2026)
+    pol, _ = policy_for(unit_case, 0)
+    tr = pol._tracker
+    tr.have_seen[0] = True
+    tr._obs_pos_abs[0] = np.array([0.2, -0.1])
+    tr._obs_step[0] = 2
+    tr._vel[0] = np.array([0.2, -0.1])  # 场地尺度/秒
+    pred = tr._predicted_rel(0, at_step=5, self_pos=np.array([0.05, 0.05]))
+    expected = np.array([0.21, -0.18])  # 三步 = 0.3 秒
+    check(
+        "速度乘 elapsed_steps*dt 后再外推",
+        np.allclose(pred, expected, atol=1e-12),
+        f"pred={pred} expected={expected}",
+    )
+
+    print("=== 8. 搜索模式（bounce / unvisited）在长回合下动作合法 ===")
     for mode in ("index", "bounce", "unvisited"):
         for (n, m, t) in ((3, 3, 10), (3, 3, 60), (1, 3, 30), (5, 5, 30)):
             try:
