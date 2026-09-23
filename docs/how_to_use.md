@@ -73,7 +73,7 @@ ProtocolSpec(protocol_version='coverage-policy/1.0', task_version='coverage-task
 
 请结合模板的[策略实现](../participant/_template/entry.py)和[协议类型](../coverage_bench/protocol.py)查看完整签名。动作必须是形状为 `(2,)` 的 `float32` 数组，两个分量都在 `[-1, 1]` 内。
 
-模型、配置和材料要求见[赛题与规程](../competitionv1.0.md)第 16 节。模板中的报告、日志和实验数据用于展示格式，提交时要换成自己的实际记录。
+模型、配置和材料要求见[赛题与规程](../competitionv1.2.md)第 16 节。模板中的报告、日志和实验数据用于展示格式，提交时要换成自己的实际记录。
 
 ### 运行前确认
 
@@ -378,6 +378,16 @@ checkpoint_manifest:
 ### 预检出现 `scan_hits`
 
 `scan_hits` 用于提示人工审核，不会单独造成硬拒绝。检查命中的文件、行号和符号，确认其用途能够在报告中解释。`rejections` 才表示必须修复的硬拒绝项。
+
+### Python 版本不是 3.12，或找不到 `python3.12`
+
+先确认虚拟环境里实际的解释器：
+
+```sh
+python -c "import sys; print(sys.version); print(sys.executable)"
+```
+
+安装 3.12、多版本共存和训练/评测环境版本不一致的处理见[Python 多版本管理](python_versions.md)。
 
 ## 完成一次实验的记录清单
 
