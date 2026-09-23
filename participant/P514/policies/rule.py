@@ -76,6 +76,20 @@ class RuleParams:
     vel_ema: float = 1.0             # 速度估计的 EMA 系数（1.0=只用最近两次观测）
     intercept_max_lead: int = 6      # 最多向前预判多少步
     intercept_weight: float = 1.0    # 1.0=完全瞄准预判点；<1 时与当前位置混合
+    # ---- 交叉感知避碰（第六轮新增）----
+    # 动机：长回合下把搜索模式从"固定方向"改成"反射巡逻"后覆盖率上升，
+    # 但**碰撞惩罚同步上升**，净 J 反而下降（T=256: 0.6118 -> 0.6006）。
+    # 原有避碰是"距离小于 avoid_radius 就施加径向排斥"，它是**反应式**的：
+    # 等两台机器人已经贴到一起才开始推，且推力与前进力互相抵消（都是单位向量），
+    # 结果既没完全避开、又偏了方向。
+    # 本项改为**预测式侧向让行**：用相对位置与相对速度算出"最近接近距离 d_min"
+    # 与"多久后接近 t_cpa"，若预判会侵入 contact_radius 则沿垂直方向让行，
+    # 让行方向固定（按相对速度的固定侧），因此双方不会互相镜像翻转而锁死。
+    # 只使用可见队友的相对位置/相对速度，不需要通信，符合局部观测权限。
+    avoid_vel: int = 1               # 1=启用预测式侧向让行
+    contact_radius: float = 0.115    # 预判侵入阈值（机器人直径 0.10 + 余量）
+    avoid_horizon: float = 3.5       # 预判时间窗（步）
+    avoid_vel_gain: float = 0.6      # 让行强度（0.6 是两套种子集上的稳健取值，见 LOG §40）
 
     @property
     def k(self) -> float:
@@ -471,7 +485,43 @@ class AnalyticTracker:
         # ---- 解析式追击方向：u ∝ goal − k·v·dt ----
         drive = goal - p.k * self_vel * p.dt
 
-        # ---- 邻居排斥势场（只使用可见邻居，符合局部观测约束）----
+        # ---- 邻居避碰（只使用可见邻居，符合局部观测约束）----
+        # 1) 预测式侧向让行（第六轮）：先按相对速度预判"会不会撞上"，会则提前侧移。
+        #    这一步放在径向排斥之前，因为它给出的是**方向性**修正，
+        #    而径向排斥在近距离会与前进力互相抵消。
+        if p.avoid_vel:
+            vg = float(p.avoid_vel_gain)
+            n_vis = max(1, int(np.sum(p_vis)))
+            # 拥挤时衰减：可见队友越多，单次让行幅度越小。
+            # 用 1/n_vis 而不是 1/√n_vis —— 大规模格子（6v3/8v8）里
+            # 侧向修正会累积成整体偏航，线性衰减能把这部分代价压掉。
+            crowd = 1.0 / float(n_vis)
+            for i in range(len(p_vis)):
+                if not p_vis[i]:
+                    continue
+                rel = peers[i, :2]
+                if float(np.linalg.norm(rel)) < _EPS:
+                    continue
+                # 观测给的是"队友相对自身"的位置与速度，故（自身速度 − 队友速度）= −dv
+                dvel = -np.asarray(peers[i, 2:4], dtype=np.float64)
+                rv = float(np.linalg.norm(dvel))
+                if rv < _EPS:
+                    continue
+                t_cpa = -float(np.dot(rel, dvel)) / (rv * rv)
+                if t_cpa <= 0.0 or t_cpa > p.avoid_horizon:
+                    continue                      # 正在远离或还太远，不必让
+                d_min = float(np.linalg.norm(rel + dvel * t_cpa))
+                if d_min >= p.contact_radius:
+                    continue                      # 预判不会侵入，保持航线
+                # 让行方向取"相对速度的固定侧"法向（双方算法一致 → 不会镜像翻转）
+                e_perp = np.array([-dvel[1], dvel[0]], dtype=np.float64) / rv
+                urgency = (p.contact_radius - d_min) / p.contact_radius
+                # 采用**叠加**而非旋转：旋转保持模长但会把净前进方向整体偏转，
+                # 在密集场景里造成绕路；叠加只是用一部分推力做侧移，
+                # 实测在 12 格规模轴上的平均代价更小（+0.0001 vs −0.0011）。
+                drive = drive + vg * crowd * urgency * e_perp * float(np.linalg.norm(drive))
+
+        # 2) 径向排斥（原有机制）：贴得很近时的兜底推离
         avoid_r = p.avoid_radius
         if p.avoid_shrink > 0.0:
             avoid_r *= max(0.0, min(1.0, steps_left / max(1, p.horizon)))
