@@ -48,7 +48,7 @@ class RuleParams:
     search_scale: float = 1.0
     search_angle_offset: float = 0.0   # 搜索基准角偏移（index 模式）：所有机器人一起旋转
     search_angle_offset_1: float = 0.0  # 仅 agent_index==1 的额外偏移（用来打破均匀分布）
-    goal_select: str = "nearest"     # nearest | index
+    goal_select: str = "nearest"     # nearest | index | coordinated
     keep_track: int = 1
     # ---- 拦截（预估目标速度，瞄准未来位置而非当前位置）----
     intercept: int = 0               # 1=启用速度估计与拦截瞄准
@@ -151,6 +151,44 @@ class AnalyticTracker:
         self._obs_step[:] = -1
         self._vel[:] = 0.0
 
+    def _local_assignment(self, targets, t_vis, peers, p_vis):
+        """无通信的确定性"就近分配"：把可见目标分配给"自己 + 可见队友"。
+
+        每台机器人只用自己看得到的对手表与目标表做同一套贪心匹配，
+        在信息一致时得到相同的解，因此不需要通信通道也能减少撞车。
+        只使用可见队友与可见目标，完全符合局部观测权限。
+
+        返回：分配给"自己"的目标下标；未分配则返回 None。
+        """
+        # 局中人：自己（下标 0）+ 可见队友（相对位置已在 peers 里）
+        poses = [np.zeros(2, dtype=np.float64)]
+        owner = [self.p.agent_index]
+        for i in range(len(p_vis)):
+            if p_vis[i]:
+                poses.append(peers[i, :2])
+                owner.append(i)  # 观测里的槽位号即队友编号
+        poses = np.asarray(poses, dtype=np.float64)
+
+        tgt_idx = np.flatnonzero(t_vis)
+        if len(tgt_idx) == 0:
+            return None
+        tgt_pos = targets[tgt_idx, :2]
+
+        dmat = np.linalg.norm(poses[:, None, :] - tgt_pos[None, :, :], axis=2)
+        order = np.dstack(np.unravel_index(np.argsort(dmat, axis=None), dmat.shape))[0]
+        taken_agents: set[int] = set()
+        taken_targets: set[int] = set()
+        assign: dict[int, int] = {}
+        for ai, ti in order:
+            if ai in taken_agents or ti in taken_targets:
+                continue
+            assign[int(ai)] = int(ti)
+            taken_agents.add(int(ai))
+            taken_targets.add(int(ti))
+
+        mine = assign.get(0)
+        return None if mine is None else int(tgt_idx[mine])
+
     def _search_goal(self) -> np.ndarray:
         n = max(1, self.p.num_agents)
         if self.p.search_mode == "fan":
@@ -196,6 +234,15 @@ class AnalyticTracker:
             idx = np.flatnonzero(t_vis)
             dist = np.linalg.norm(targets[idx, :2], axis=1)
             order = idx[np.argsort(dist)]
+
+            # 协同选择：用"自己 + 可见队友"的就近分配决定自己负责哪个目标
+            assigned = None
+            if p.goal_select == "coordinated":
+                assigned = self._local_assignment(targets, t_vis, peers, p_vis)
+                if assigned is not None:
+                    order = np.array(
+                        [assigned] + [j for j in order if j != assigned], dtype=np.int64
+                    )
 
             if p.intercept:
                 # 拦截：分别在每个目标上求"最小可达步数 t"，取 t 最小者，

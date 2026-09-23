@@ -23,6 +23,13 @@ if str(_HERE) not in sys.path:
 
 from policies.rule import AnalyticTracker, build_tracker  # noqa: E402
 
+# 提交默认参数：goal_select="coordinated" 用"自己 + 可见队友"做无通信就近分配。
+# 在 3v3/T=10（公开组与核验组）上与 nearest 逐位一致——该回合长度下总可达位移
+# 仅约 0.21，协同无可用自由度；但在更大规模/更长回合上稳定提升覆盖率并降低碰撞
+# （LOG.md 泛化章节：N8M8 覆盖率 0.327→0.341、碰撞率 0.040→0.019，独立种子集复现）。
+# 因此这是"不牺牲当前分数、只增强泛化"的默认选择。
+SUBMISSION_OVERRIDES = {"goal_select": "coordinated"}
+
 
 class RulePolicy:
     """策略协议适配器：reset 时按本回合公开参数构建追踪器。"""
@@ -31,7 +38,7 @@ class RulePolicy:
         self._tracker: AnalyticTracker | None = None
 
     def reset(self, context):
-        self._tracker = build_tracker(context)
+        self._tracker = build_tracker(context, SUBMISSION_OVERRIDES)
 
     def act(self, observation):
         if self._tracker is None:  # 兜底：未 reset 不应发生，但保证始终返回合法动作

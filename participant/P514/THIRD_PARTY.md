@@ -34,3 +34,20 @@
 其中 `tools/` 与 `policies/probe.py`、`policies/random_ref.py` 是**开发期对照实验工具**，
 不参与正式推理；`probe.py` 会读取训练专用全局状态，仅用于测量任务的物理上界，
 **不是可部署策略**，`entry.py` 不会导入它。
+
+工具清单与用途：
+
+| 工具 | 用途 |
+|---|---|
+| `tools/rollout.py` | 按公开 `scenario_seed` 复现 4 个公开场景，与评测器同口径 |
+| `tools/sweep.py` | 留出场景评测（防公开套件过拟合） |
+| `tools/generalize.py` | **参数泛化台**：N×M×T×layout 与随机基线对照 |
+| `tools/sanity_check.py` | 指标量级核查（下结论前先验尺子） |
+| `tools/upper_bound.py` | 规则策略 vs 全信息 oracle 对照 |
+| `tools/bootstrap_ci.py` | 公开成绩的 bootstrap 置信区间 |
+| `tools/summarize_eval.py` | 评测输出目录逐回合汇总 |
+
+其中 `tools/rollout.py` 早期版本曾使用 `importlib.util.spec_from_file_location`
+动态载入策略模块，触发官方静态审计硬拒绝项 `UNREGISTERED_DYNAMIC_LOAD`；
+现已改为包内静态导入，预检 `rejections=0`。提交目录内**不含**任何动态载入调用。
+
