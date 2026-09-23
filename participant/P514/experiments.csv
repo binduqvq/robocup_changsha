@@ -1,0 +1,12 @@
+experiment_id,date,code_version,policy,params,scenario_source,n_cases,per_group_eval,basic_mean_j,coop_mean_j,public_score,heldout_score,status,notes
+E000,2026-02-14,P514@template,SB3 PPO template,npz from _template,configs/public-suite-v1.yaml,4,2,0.0000,0.1333,66.67,,ok,模板基线；basic 组 4 回合全 0；provenance=local_preview；低于官方学习基线 P903=116.67
+E001,2026-02-14,P514@rule-v1,analytic bang-bang tracker,defaults,configs/public-suite-v1.yaml,4,2,0.0833,0.2833,183.33,,ok,规则策略首版；预检 exit0；rollout.py 与官方评测口径一致（模板 66.6667 对 66.67）
+E001h,2026-02-14,P514@rule-v1,analytic bang-bang tracker,defaults,heldout seed_offset=555000,40,1,0.1353,0.1233,,129.33,ok,留出场景；公开 183 与留出 129 差距说明公开 4 场景噪声大
+E002,2026-02-14,P514@rule-v1,param ablation,avoid_gain x search_scale x goal_select x reach_aware,heldout seed_offset=555000,40,1,0.1353,0.1233,,129.33,negative,60 组网格只落 2 个分数；avoid_gain 0→2.5 无影响；平均碰撞率 0.0033
+E003,2026-02-14,P514@calib,uniform random action,-,configs/public-suite-v1.yaml,4,2,0.0000,0.2667,133.33,,ok,随机动作在公开套件的标定（P901 口径）
+E003h,2026-02-14,P514@calib,uniform random action,-,heldout seed_offset=555000,128,2,0.0587,0.0573,,58.02,ok,随机动作留出场景标定（每组 32×2 独立种子）
+E004,2026-02-14,P514@calib,oracle nearest (global state),-,heldout seed_offset=555000,40,1,0.1353,0.1233,,129.33,ok,全信息 oracle 与规则策略同分→信息非瓶颈
+E004h,2026-02-14,P514@calib,oracle nearest (global state),-,heldout seed_offset=555000,128,2,0.1437,0.1449,,144.32,ok,128 独立场景复现：oracle 144.32 vs 规则 144.64 → 规则已达物理可达性上界
+E005,2026-02-14,P514@rule-v1,search/track variants,search_mode x fan_span x keep_track x goal_select,heldout seed_offset=555000,48,1,0.1322,0.1097,,120.97,negative,24 组无显著差异；不同种子集本身有约 ±7 分波动
+E006,2026-02-14,P514@rule-v1-final,analytic tracker (FINAL SUBMISSION),defaults,configs/public-suite-v1.yaml,4,2,0.0833,0.2833,183.33,,ok,最终提交；预检 rejections=0 scan_hits=0；8/8 回合 ok；entry.py 采用 policies/rule.py
+E006h,2026-02-14,P514@rule-v1-final,analytic tracker (FINAL SUBMISSION),defaults,heldout seed_offset=555000,128,2,0.1448,0.1445,,144.64,ok,128 个独立留出场景；期望表现的更可靠估计

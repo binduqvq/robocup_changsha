@@ -1,0 +1,6 @@
+{
+  "avoid_gain": [0.0, 0.5, 0.9, 1.5, 2.5],
+  "search_scale": [0.5, 1.0, 2.0],
+  "goal_select": ["nearest", "index"],
+  "reach_aware": [0, 1]
+}

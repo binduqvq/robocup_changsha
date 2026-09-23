@@ -1,0 +1,6 @@
+{
+  "search_mode": ["index", "fan"],
+  "fan_span": [1.5707963267948966, 3.141592653589793, 6.283185307179586],
+  "keep_track": [0, 1],
+  "goal_select": ["nearest", "index"]
+}

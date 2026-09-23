@@ -1,0 +1,14 @@
+submission_schema_version: "coverage-submission/1.0"
+participant_id: "P514"
+protocol_version: "coverage-policy/1.0"
+task_version: "coverage-task/1.0"
+entrypoint: "entry:build_policy"
+artifact_dir: "artifacts"
+checkpoint_manifest: []
+inference_lock: "requirements-infer.lock"
+method_type: "rule"
+train_command: null
+training_config_paths: []
+report_path: "REPORT.md"
+metadata:
+  description: "解析式追捕规则策略：bang-bang 追捕可见目标 + 视野外按编号分散搜索 + 可见邻居排斥避碰；纯 numpy，无模型产物"
