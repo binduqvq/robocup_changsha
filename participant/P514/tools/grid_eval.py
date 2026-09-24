@@ -76,7 +76,7 @@ def main():
         print(f"  {'OK ' if ok else 'WARN'} 键 {k}: {len(seen)} 个不同分数 "
               f"（{'参数生效' if ok else '该键对所有取值给出相同结果，需人工确认'}）")
         if not ok and not args.allow_neutral:
-            print(f"       ⚠️ 若预期该键应有影响，请检查参数是否被覆盖。")
+            print("       WARN: 若预期该键应有影响，请检查参数是否被覆盖。")
 
     run_grid(cases, combos, f"{args.config.name}  seed_base={args.seed_offset}")
 

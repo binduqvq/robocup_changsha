@@ -11,8 +11,9 @@
         S(n) = dt · Σ_{i=1..n} v_{i-1} = dt · c · Σ_{i=1..n} (1 - k^(i-1)) / (1-k)
     S(10) ≈ 0.249：**10 步整场最多只能移动约 0.25（场地半宽 1.0）**。
     速度上限 1.0 在该回合长度内不是紧约束，驱动力/阻尼才是。
-    盒约束 u ∈ [-1,1]^2 下可达集是同心球，故单步最优控制是 bang-bang：
-    最大化"下一步位移在目标方向上的投影"⇒ u ∝ (目标相对位置 − k·v·dt)。
+    动作是逐轴盒约束 u ∈ [-1,1]^2，因此可控位移集是轴对齐方盒，
+    而不是二范数球。正式 T=10 使用逐轴饱和，尽快兑现两个独立控制轴；
+    扩展长回合则回退 L∞ 归一化，减少持续满舵造成的过冲与碰撞。
 
     目标相对位置定义为 目标 − 自身，因此朝目标推进 = 让自身位移沿该向量。
 
@@ -36,6 +37,7 @@ class RuleParams:
     num_agents: int = 3
     num_targets: int = 3
     horizon: int = 10
+    map_half_extent: float = 1.0
     damping: float = 0.25
     dt: float = 0.1
     drive_step: float = 0.1          # c = drive_force/mass * dt
@@ -43,7 +45,7 @@ class RuleParams:
     sense_radius: float = 0.6
     robot_radius: float = 0.05
     avoid_radius: float = 0.20
-    avoid_gain: float = 0.9
+    avoid_gain: float = 0.6
     avoid_shrink: float = 0.0
     search_mode: str = "index"       # index | fan | last_seen | center | bounce | unvisited
     fan_span: float = 3.141592653589793
@@ -54,6 +56,7 @@ class RuleParams:
     goal_select: str = "nearest"     # nearest | index | coordinated | cover
     assignment_solver: str = "greedy"  # greedy | optimal（局部可见二分图的精确最小成本匹配）
     keep_track: int = 1
+    track_memory_steps: int = 0      # 目标刚离开视野后，按轨迹外推继续追踪的步数
     # ---- 覆盖时长最优的目标选择（第五轮新增）----
     # 动机：离线"恒定动作上界"在 T=10 上比本规则高约 41%（32 场景 5.97 vs 4.22），
     # 且最优动作里大量是 [0,0]（**原地不动**）—— 说明奖励是**逐步累加**的，
@@ -63,6 +66,10 @@ class RuleParams:
     cover_hold_weight: float = 0.5
     cover_horizon: int = 24
     thrust_mode: str = "full"        # full | arrive（按剩余可达位移缩放推力，近处不冲过头）
+    action_norm: str = "l2"          # l2（历史）| linf（方向保持）| box（逐轴饱和）| adaptive
+    action_box_scale: float = 0.0     # <=0 时由 drive_step*dt 推导；轴误差达此尺度时满舵
+    box_horizon_max: int = 10         # adaptive: 短回合用 box，长回合用更平滑的 linf
+    reach_box: int = 0                # 1=按逐轴盒可达集判断覆盖可达性
     reach_mode: str = "exact"        # exact（修正后的真实可达半径）| legacy（旧的有缺陷实现）
     # ---- 搜索阶段的"持续探索"（第五轮新增，修复长回合顶墙退化）----
     # 旧行为：视野内无目标时按 agent_index 取固定方向**满舵**，机器人在 T 步内
@@ -111,6 +118,7 @@ class RuleParams:
             num_agents=int(context.num_agents),
             num_targets=int(context.num_targets),
             horizon=int(context.horizon),
+            map_half_extent=float(task.map_half_extent),
             damping=float(task.damping),
             dt=float(task.dt),
             drive_step=float(task.drive_force) / float(task.robot_mass) * float(task.dt),
@@ -141,6 +149,7 @@ class AnalyticTracker:
         self._obs_pos_abs = np.zeros((params.num_targets, 2), dtype=np.float64)
         self._obs_step = np.full(params.num_targets, -1, dtype=np.int64)
         self._vel = np.zeros((params.num_targets, 2), dtype=np.float64)
+        self._last_goal_target = -1
         # 持续探索状态（反射巡逻方向 + 本地已访问网格）
         self._explore_dir = np.zeros(2, dtype=np.float64)
         self._visited: set[tuple[int, int]] = set()
@@ -166,7 +175,7 @@ class AnalyticTracker:
         # `_vel` 由相邻两帧绝对位置差除以 dt 得到，单位是“场地尺度/秒”；
         # `age` 则是离散步数。这里必须再乘 dt 才能得到位移。历史实现漏掉
         # 这一因子，会把目标外推约 1/dt=10 倍，并在边界夹紧后产生虚假拦截点。
-        limit = 1.0 - self.p.coverage_radius
+        limit = self.p.map_half_extent - self.p.coverage_radius
         elapsed = age * self.p.dt
         if self.p.predict_reflect:
             pred_abs = self._obs_pos_abs[j].copy()
@@ -232,6 +241,20 @@ class AnalyticTracker:
         steps = max(0, min(int(steps), len(self._radius_table) - 1))
         return self._radius_table[steps]
 
+    def _can_cover(self, residual: np.ndarray, steps: int) -> bool:
+        """判断控制位移集在 steps 步内是否能与目标覆盖圆相交。
+
+        `reach_box=0` 保留历史的球形近似；启用后按真实逐轴盒约束计算：
+        先把相对位移投影到 [-R,R]^2，再检查到该方盒的欧氏距离
+        是否不超过覆盖半径。
+        """
+        reach = self._reachable(steps)
+        vec = np.asarray(residual, dtype=np.float64)
+        if self.p.reach_box:
+            outside = np.maximum(np.abs(vec) - reach, 0.0)
+            return float(np.linalg.norm(outside)) <= self.p.coverage_radius
+        return float(np.linalg.norm(vec)) <= reach + self.p.coverage_radius
+
     # ------------------------------------------------------------------
     def reset(self, context=None):
         self.last_seen[:] = 0.0
@@ -239,6 +262,7 @@ class AnalyticTracker:
         self._obs_pos_abs[:] = 0.0
         self._obs_step[:] = -1
         self._vel[:] = 0.0
+        self._last_goal_target = -1
         # 规程 §14：每局必须清除历史观测。探索状态同属回合内记忆，必须一并清空，
         # 且不同机器人之间不共享（每台机器人一个实例）。
         self._explore_dir[:] = 0.0
@@ -383,7 +407,7 @@ class AnalyticTracker:
             angle = 2.0 * np.pi * (self.p.agent_index / max(1, self.p.num_agents))
             v = np.array([np.cos(angle), np.sin(angle)], dtype=np.float64)
         look = float(self.p.search_bounce_look)
-        limit = 1.0 - self.p.robot_radius
+        limit = self.p.map_half_extent - self.p.robot_radius
         proj = np.asarray(self_pos, dtype=np.float64) + v * look
         for axis in (0, 1):
             if proj[axis] > limit:
@@ -452,7 +476,7 @@ class AnalyticTracker:
             for j in np.flatnonzero(t_vis):
                 gap = step_idx - self._obs_step[j]
                 if self._obs_step[j] >= 0 and gap == 1:
-                    v = (targets[j, :2] - self._obs_pos_abs[j] + self_pos) / p.dt  # 场地尺度/步
+                    v = (targets[j, :2] - self._obs_pos_abs[j] + self_pos) / p.dt  # 场地尺度/秒
                     self._vel[j] = p.vel_ema * v + (1.0 - p.vel_ema) * self._vel[j]
                 elif gap > 1:
                     # 间隔超过 1 步：期间可能发生转向，不能把旧差分当速度用
@@ -464,6 +488,7 @@ class AnalyticTracker:
                 self.last_seen[j, 2] = targets[j, 2]
 
         goal = None
+        goal_target = None
         if t_vis.any():
             idx = np.flatnonzero(t_vis)
             dist = np.linalg.norm(targets[idx, :2], axis=1)
@@ -498,23 +523,26 @@ class AnalyticTracker:
                         else:
                             drift_gain = p.dt * tau
                         residual = pt - self_vel * drift_gain
-                        if float(np.linalg.norm(residual)) <= self._reachable(tau) + p.coverage_radius:
+                        if self._can_cover(residual, tau):
                             t_min = tau
                             cand_pt = pt
                             break
                     if t_min is None:
                         continue
-                    candidate = (t_min, rank, cand_pt)
+                    candidate = (t_min, rank, cand_pt, int(j))
                     if best is None or candidate[:2] < best[:2]:
                         best = candidate
                 if best is not None:
                     goal = ((1.0 - p.intercept_weight) * targets[order[0], :2]
                             + p.intercept_weight * best[2])
+                    goal_target = best[3]
             if goal is None:
                 if p.keep_track:
                     # 优先追"剩余步数内真的够得着"的目标；一个都够不着时才退回最近者
-                    reach = self._reachable(steps_left) + p.coverage_radius
-                    ok = order[dist[np.argsort(dist)] <= reach]
+                    ok = np.asarray(
+                        [j for j in order if self._can_cover(targets[j, :2], steps_left)],
+                        dtype=np.int64,
+                    )
                     if len(ok):
                         order = ok
                 if p.goal_select == "cover":
@@ -528,12 +556,27 @@ class AnalyticTracker:
                             continue
                         if best is None or sc < best[0]:
                             best = (sc, int(j))
-                    goal = targets[best[1], :2] if best is not None else targets[order[0], :2]
+                    goal_target = best[1] if best is not None else int(order[0])
+                    goal = targets[goal_target, :2]
                 elif p.goal_select == "index":
                     mine = p.agent_index % max(1, p.num_targets)
-                    goal = targets[mine, :2] if t_vis[mine] else targets[order[0], :2]
+                    goal_target = mine if t_vis[mine] else int(order[0])
+                    goal = targets[goal_target, :2]
                 else:
-                    goal = targets[order[0], :2]
+                    goal_target = int(order[0])
+                    goal = targets[goal_target, :2]
+
+            if goal_target is not None:
+                self._last_goal_target = int(goal_target)
+
+        # 短时 belief coasting：已追踪目标刚离开视野时，不要立即切回
+        # 无关的编号搜索方向。在有界 TTL 内用最后两帧得到的速度传播
+        # 目标信念；TTL 超时后丢弃，避免目标转向后长时追逐幽灵轨迹。
+        if goal is None and p.track_memory_steps > 0 and self._last_goal_target >= 0:
+            j = int(self._last_goal_target)
+            age = step_idx - int(self._obs_step[j])
+            if 0 < age <= int(p.track_memory_steps):
+                goal = self._predicted_rel(j, step_idx, self_pos)
 
         # 视野内无目标：优先朝最后目击点，否则按编号方向搜索
         if goal is None and p.search_mode == "last_seen" and self.have_seen.any():
@@ -596,8 +639,20 @@ class AnalyticTracker:
                 w = p.avoid_gain * (avoid_r - d) / avoid_r
                 drive = drive - w * (rel / d)
 
-        n = float(np.linalg.norm(drive))
-        u = drive / n if n > _EPS else np.zeros(2, dtype=np.float64)
+        action_mode = p.action_norm
+        if action_mode == "adaptive":
+            action_mode = "box" if p.horizon <= int(p.box_horizon_max) else "linf"
+        if action_mode == "box":
+            configured = float(p.action_box_scale)
+            scale = max(_EPS, configured if configured > 0.0 else p.c * p.dt)
+            u = np.clip(drive / scale, -1.0, 1.0)
+            n = float(np.linalg.norm(drive))
+        elif action_mode == "linf":
+            n = float(np.max(np.abs(drive)))
+            u = drive / n if n > _EPS else np.zeros(2, dtype=np.float64)
+        else:
+            n = float(np.linalg.norm(drive))
+            u = drive / n if n > _EPS else np.zeros(2, dtype=np.float64)
         if p.thrust_mode == "arrive":
             # 到达式推力：剩余可达位移 R(steps_left) 大于目标距离时不必满舵，
             # 否则会在覆盖半径内"冲过头"再折返，浪费掉本来可以持续覆盖的步数。

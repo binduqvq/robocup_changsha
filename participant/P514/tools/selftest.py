@@ -156,6 +156,7 @@ def main():
     tracker.last_seen[:] = 9.9
     tracker._obs_step[:] = 3
     tracker._vel[:] = 1.0
+    tracker._last_goal_target = 2
     pol.reset(ctx)
     t2 = pol._tracker
     clean = (
@@ -163,8 +164,9 @@ def main():
         and not np.any(t2.last_seen != 0.0)
         and np.all(t2._obs_step == -1)
         and not np.any(t2._vel != 0.0)
+        and t2._last_goal_target == -1
     )
-    check("reset 清空 last_seen/have_seen/_obs_step/_vel", clean)
+    check("reset 清空目标观测、速度与最后追踪编号", clean)
 
     # 第五轮新增的探索状态同属回合内记忆，必须一并清空（规程 §14）
     pol2, ctx2 = policy_for(case, 0)
@@ -225,7 +227,44 @@ def main():
         f"pred={pred} expected={expected}",
     )
 
-    print("=== 8. 搜索模式（bounce / unvisited）在长回合下动作合法 ===")
+    print("=== 8. 盒约束控制与可达几何 ===")
+    obs_box = {
+        "self_state": np.array([0.0, 0.0, 0.0, 0.0, 0.05], dtype=np.float32),
+        "targets": np.array([[0.4, 0.2, 0.15]], dtype=np.float32),
+        "target_visible": np.array([True]),
+        "peers": np.zeros((1, 5), dtype=np.float32),
+        "peer_visible": np.array([False]),
+        "step_index": np.int64(0),
+    }
+    box_tracker = rule.AnalyticTracker(rule.RuleParams(
+        num_agents=1, num_targets=1, horizon=10, action_norm="box",
+        action_box_scale=0.0, reach_box=1,
+    ))
+    box_action = box_tracker.act(obs_box)
+    check(
+        "短回合逐轴饱和会同时用满两轴",
+        np.array_equal(box_action, np.array([1.0, 1.0], dtype=np.float32)),
+        f"action={box_action}",
+    )
+    r10 = box_tracker._reachable(10)
+    corner_residual = np.array([r10 + 0.1, r10 + 0.1])
+    check(
+        "方盒可达集与覆盖圆的相交判定",
+        box_tracker._can_cover(corner_residual, 10),
+        f"R10={r10:.6f} residual={corner_residual}",
+    )
+    adaptive_tracker = rule.AnalyticTracker(rule.RuleParams(
+        num_agents=1, num_targets=1, horizon=50, action_norm="adaptive",
+        action_box_scale=0.0, box_horizon_max=10, reach_box=1,
+    ))
+    adaptive_action = adaptive_tracker.act(obs_box)
+    check(
+        "adaptive 在长回合回退为方向保持 L∞ 控制",
+        np.allclose(adaptive_action, np.array([1.0, 0.5], dtype=np.float32)),
+        f"action={adaptive_action}",
+    )
+
+    print("=== 9. 搜索模式（bounce / unvisited）在长回合下动作合法 ===")
     for mode in ("index", "bounce", "unvisited"):
         for (n, m, t) in ((3, 3, 10), (3, 3, 60), (1, 3, 30), (5, 5, 30)):
             try:

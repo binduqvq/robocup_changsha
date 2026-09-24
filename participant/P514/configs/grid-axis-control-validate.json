@@ -1,0 +1,6 @@
+{
+  "action_norm": ["box"],
+  "action_box_scale": [0.01, 0.03, 0.05, 0.1],
+  "reach_box": [1],
+  "track_memory_steps": [0]
+}

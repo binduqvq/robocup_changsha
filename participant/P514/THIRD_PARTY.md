@@ -35,6 +35,12 @@
 | The Hybrid Reciprocal Velocity Obstacle | 相对位置/速度的预测式避碰思想 | https://doi.org/10.1109/TRO.2011.2120810 |
 | The Surprising Effectiveness of PPO in Cooperative Multi-Agent Games | MAPPO/CTDE 对照路线 | https://arxiv.org/abs/2103.01955 |
 | Multi-Agent Reinforcement Learning is a Sequence Modeling Problem | MAT 作为长回合协同的后续候选 | https://arxiv.org/abs/2205.14953 |
+| PettingZoo MPE Simple Spread | 相似的多智能体覆盖、协作与碰撞任务；用于确认问题结构 | https://pettingzoo.farama.org/1.22.3/environments/mpe/simple_spread/ |
+| Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments | MADDPG 与 MPE 学习基线背景；用于定位规则/学习对照 | https://arxiv.org/abs/1706.02275 |
+| Scalable Distributed Planning for Multi-Robot Multi-Target Tracking | 滚动时域、分布式目标分配与跟踪的调研依据 | https://arxiv.org/abs/2107.08550 |
+| Distributed Assignment with Limited Communication | 有限通信条件下分布式分配的边界与后续方向 | https://arxiv.org/abs/1812.11172 |
+| Multi-Robot Target Tracking with Limited Field of View | 有限视野下短时目标记忆/轨迹外推的调研依据；E041 消融 | https://www.roboticsproceedings.org/rss19/p109.pdf |
+| Multi-agent coverage control with transient behavior | 将短回合瞬态性能而非仅稳态覆盖作为优化目标 | https://proceedings.mlr.press/v242/zhang24e.html |
 
 这些资料只影响算法设计与实验选择；本目录没有复制其源码、伪代码、模型权重或数据集，
 因此不会给最终推理路径增加第三方许可或运行依赖。

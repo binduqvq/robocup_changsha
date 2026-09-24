@@ -1,0 +1,4 @@
+{
+  "action_norm": ["l2", "linf"],
+  "reach_box": [0, 1]
+}

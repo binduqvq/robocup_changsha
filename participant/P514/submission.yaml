@@ -15,4 +15,4 @@ train_command: "python train.py --total-steps 1000000 --out ../../outputs/P514/t
 training_config_paths: []
 report_path: "REPORT.md"
 metadata:
-  description: "解析式追捕规则策略：局部历史目标速度估计 + 含当前动量的有限时域截获 + 可见队友就近分配 + 定向搜索 + 预测式侧向避碰；纯 numpy、无模型产物、无训练依赖"
+  description: "解析式追捕规则策略：逐轴盒可达几何 + 短回合饱和/长回合L∞自适应控制 + 局部历史速度截获 + 可见队友分配与预测避碰；纯 numpy、无模型产物、无训练依赖"

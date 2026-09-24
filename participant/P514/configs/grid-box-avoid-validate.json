@@ -1,0 +1,8 @@
+{
+  "action_norm": ["box"],
+  "action_box_scale": [0.01],
+  "reach_box": [1],
+  "track_memory_steps": [0],
+  "avoid_radius": [0.2],
+  "avoid_gain": [0.6, 0.9]
+}

@@ -28,12 +28,19 @@ from policies.rule import AnalyticTracker, build_tracker  # noqa: E402
 # - intercept 用相邻观测估计目标速度，在含当前机器人动量的有限时域可达集上
 #   求最早截获点。两套不相交的 128 场景上分别提升 +0.68 / +1.20 分，且
 #   12 个规模/布局格仍全部优于随机（见 LOG.md 第七轮）。
+# - adaptive 按真实 [-1,1]^2 盒约束在短回合逐轴饱和，长回合回退
+#   方向保持的 L∞ 控制；四套各 128 隐藏种子代理集均提升。
 SUBMISSION_OVERRIDES = {
     "goal_select": "coordinated",
     "intercept": 1,
     "intercept_weight": 1.0,
     "intercept_max_lead": 10,
     "vel_ema": 1.0,
+    "action_norm": "adaptive",
+    "action_box_scale": 0.0,
+    "box_horizon_max": 10,
+    "reach_box": 1,
+    "avoid_gain": 0.6,
 }
 
 

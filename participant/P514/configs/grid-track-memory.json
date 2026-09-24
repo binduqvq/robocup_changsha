@@ -1,0 +1,5 @@
+{
+  "action_norm": ["linf"],
+  "reach_box": [1],
+  "track_memory_steps": [0, 1, 2, 4, 6]
+}

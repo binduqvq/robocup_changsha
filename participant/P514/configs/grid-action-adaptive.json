@@ -1,0 +1,9 @@
+{
+  "action_norm": ["linf", "box", "adaptive"],
+  "action_box_scale": [0.0],
+  "box_horizon_max": [10],
+  "reach_box": [1],
+  "track_memory_steps": [0],
+  "avoid_radius": [0.2],
+  "avoid_gain": [0.6]
+}

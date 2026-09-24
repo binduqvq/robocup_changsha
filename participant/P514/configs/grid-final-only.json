@@ -1,0 +1,13 @@
+{
+  "action_norm": ["adaptive"],
+  "action_box_scale": [0.0],
+  "box_horizon_max": [10],
+  "reach_box": [1],
+  "track_memory_steps": [0],
+  "avoid_radius": [0.2],
+  "avoid_gain": [0.6],
+  "intercept": [1],
+  "intercept_weight": [1.0],
+  "intercept_max_lead": [10],
+  "vel_ema": [1.0]
+}
